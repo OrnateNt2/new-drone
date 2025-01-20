@@ -7,15 +7,14 @@ import os
 # --------------------------------------------
 MIN_MAX_DIFF_THRESHOLD = 20         # Если (maxVal - minVal) < 20 => нет заметного перепада температур
 threshold_ratio = 0.8               # Порог для бинаризации (80% от maxVal)
-MAX_BBOX_AREA = 50000               # Максимально допустимая площадь bbox (пример)
-ABRUPT_CHANGE_FACTOR = 2.5          # Если площадь меняется более чем в 2.5 раза за кадр — сбой
+MAX_BBOX_AREA = 50000               # Максимально допустимая площадь bbox ?
+ABRUPT_CHANGE_FACTOR = 2.5          # Если площадь меняется более чем в 2.5 раза за кадр - сбой
 STABLE_MAX_FRAMES = 50              # Если bbox стабилен ~ 50 кадров => реинициализация
 STABLE_POS_THRESH = 10              # Порог для изменения координат центра
 STABLE_SIZE_THRESH = 10             # Порог для изменения w/h
 # --------------------------------------------
 
 def create_tracker():
-    # Для OpenCV 4.5+ трекеры часто доступны в модуле legacy
     return cv2.legacy.TrackerCSRT_create()
 
 def distance_rects(r1, r2):
@@ -28,8 +27,8 @@ def distance_rects(r1, r2):
 
 def unify_bboxes(bboxes, dist_threshold=50):
     """
-    Объединяет все близкие bbox'ы (по расстоянию между центрами) в один.
-    Возвращает список «кластеров» (bbox).
+    Объединяет все близкие bbox'ы (по расстоянию между центрами) в один
+    Возвращает список «кластеров» (bbox)
     """
     if not bboxes:
         return []
@@ -70,14 +69,14 @@ def unify_bboxes(bboxes, dist_threshold=50):
 
 def detect_hot_bbox(frame):
     """
-    1. Проверяем разницу minVal и maxVal в кадре (gray), если < MIN_MAX_DIFF_THRESHOLD => нет цели.
-    2. Порог по threshold_ratio (80%) от maxVal => бинаризуем => контуры.
+    1. Проверяем разницу minVal и maxVal в кадре (gray), если < MIN_MAX_DIFF_THRESHOLD => нет цели
+    2. Порог по threshold_ratio (80%) от maxVal => бинаризуем => контуры
     3. Объединяем близкие контуры => выбираем единственный bbox:
        - если один кластер => его и берём
        - если несколько => выбираем тот, где контур с самой большой средней яркостью
     4. Если bbox > MAX_BBOX_AREA => сбой => None
 
-    Возвращает (x, y, w, h) или None.
+    Возвращает (x, y, w, h) или None
     """
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     minVal, maxVal, _, _ = cv2.minMaxLoc(gray)
@@ -137,7 +136,7 @@ def bbox_area(bbox):
 def is_bbox_change_abrupt(old_bbox, new_bbox):
     """
     Проверяем, не слишком ли резко изменился размер bbox:
-    если площадь выросла/уменьшилась более, чем в ABRUPT_CHANGE_FACTOR раз за один кадр => сбой.
+    если площадь выросла/уменьшилась более, чем в ABRUPT_CHANGE_FACTOR раз за один кадр => сбой
     """
     old_area = bbox_area(old_bbox)
     new_area = bbox_area(new_bbox)
@@ -291,11 +290,9 @@ if __name__ == "__main__":
     if mode == '1':
         input_source = "rtsp://root:root@192.168.0.90/axis-media/media.amp?compression=100"
     elif mode == '3':
-        # Пример для Axis Q1921 (M-JPEG по HTTP)
-        # Возможны варианты URL, в зависимости от настроек
+        # ?fps=25&resolution=640x480
         input_source = "http://root:root@192.168.0.90/axis-cgi/mjpg/video.cgi"
     else:
-        # По умолчанию – локальный файл
         input_source = "input/1.mp4"
 
     os.makedirs("output", exist_ok=True)
