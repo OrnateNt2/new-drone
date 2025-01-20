@@ -15,7 +15,7 @@ STABLE_SIZE_THRESH = 10             # Порог для изменения w/h
 # --------------------------------------------
 
 def create_tracker():
-    # Для OpenCV 4.5+ трекеры часто в legacy
+    # Для OpenCV 4.5+ трекеры часто доступны в модуле legacy
     return cv2.legacy.TrackerCSRT_create()
 
 def distance_rects(r1, r2):
@@ -55,7 +55,7 @@ def unify_bboxes(bboxes, dist_threshold=50):
                             changed = True
                             break
 
-        # Объединяем bbox’ы кластера в общий bbox
+        # Объединяем bbox’ы кластера в один общий bbox
         xs = [c[0] for c in cluster]
         ys = [c[1] for c in cluster]
         ws = [c[2] for c in cluster]
@@ -64,7 +64,7 @@ def unify_bboxes(bboxes, dist_threshold=50):
         y_min = min(ys)
         x_max = max(xs[i] + ws[i] for i in range(len(xs)))
         y_max = max(ys[i] + hs[i] for i in range(len(ys)))
-        merged.append( (x_min, y_min, x_max - x_min, y_max - y_min) )
+        merged.append((x_min, y_min, x_max - x_min, y_max - y_min))
 
     return merged
 
@@ -74,7 +74,7 @@ def detect_hot_bbox(frame):
     2. Порог по threshold_ratio (80%) от maxVal => бинаризуем => контуры.
     3. Объединяем близкие контуры => выбираем единственный bbox:
        - если один кластер => его и берём
-       - если несколько => берём тот, где контур с самой большой средней яркостью
+       - если несколько => выбираем тот, где контур с самой большой средней яркостью
     4. Если bbox > MAX_BBOX_AREA => сбой => None
 
     Возвращает (x, y, w, h) или None.
@@ -110,22 +110,21 @@ def detect_hot_bbox(frame):
         return None
     if len(merged) == 1:
         # единственный кластер
-        x, y, w, h = merged[0]
-        if w*h > MAX_BBOX_AREA:
+        (mx, my, mw, mh) = merged[0]
+        if mw * mh > MAX_BBOX_AREA:
             return None
         return merged[0]
 
     # Иначе несколько кластеров - выбираем тот, где контур с самой большой яркостью
     max_idx = np.argmax(brightness_map)
     chosen_box = boxes[max_idx]  # (x, y, w, h)
-    # Смотрим, в какой merged bbox он попал
     x_c, y_c, w_c, h_c = chosen_box
     center_c = (x_c + w_c/2, y_c + h_c/2)
 
     for mb in merged:
         mx, my, mw, mh = mb
         if (mx <= center_c[0] <= mx + mw) and (my <= center_c[1] <= my + mh):
-            if mw*mh > MAX_BBOX_AREA:
+            if mw * mh > MAX_BBOX_AREA:
                 return None
             return mb
 
@@ -137,13 +136,13 @@ def bbox_area(bbox):
 
 def is_bbox_change_abrupt(old_bbox, new_bbox):
     """
-    Проверяем, не слишком ли резко изменился размер bbox
-    (если площадь выросла/уменьшилась более, чем в ABRUPT_CHANGE_FACTOR раз).
+    Проверяем, не слишком ли резко изменился размер bbox:
+    если площадь выросла/уменьшилась более, чем в ABRUPT_CHANGE_FACTOR раз за один кадр => сбой.
     """
     old_area = bbox_area(old_bbox)
     new_area = bbox_area(new_bbox)
     if old_area == 0 or new_area == 0:
-        return False  # если вдруг 0, пусть не триггерит
+        return False  # на всякий случай, если вдруг 0, не триггерим
     ratio = max(new_area, old_area) / min(new_area, old_area)
     return ratio > ABRUPT_CHANGE_FACTOR
 
@@ -186,7 +185,7 @@ def process_video(input_path, output_path):
     current_bbox = None
 
     stable_frames = 0    # счётчик, сколько кадров подряд bbox "почти не менялся"
-    last_bbox = None      # хранит bbox предыдущего кадра (для стабильности)
+    last_bbox = None     # хранит bbox предыдущего кадра (для стабильности)
 
     while True:
         ret, frame = cap.read()
@@ -210,19 +209,16 @@ def process_video(input_path, output_path):
             # Шаг трекера
             success, tracked_box = tracker.update(frame)
             if success:
-                # Получаем актуальный bbox
+                # Трекер дал нам bbox
                 x_t, y_t, w_t, h_t = [int(v) for v in tracked_box]
                 new_bbox = (x_t, y_t, w_t, h_t)
 
-                # Дополнительно пытаемся детектить: 
-                # (можно не на каждом кадре, но в примере — на каждом)
+                # Для точности: ищем горячую зону снова
                 detected_bbox = detect_hot_bbox(frame)
-
                 if detected_bbox is not None:
                     # Проверим резкий скачок размера
                     if not is_bbox_change_abrupt(new_bbox, detected_bbox):
-                        # Если нет резкого скачка, используем более точный detected_bbox
-                        # Но проверим всё равно площадь
+                        # Если нет резкого скачка, берём detected_bbox
                         if bbox_area(detected_bbox) <= MAX_BBOX_AREA:
                             new_bbox = detected_bbox
                             # Обновим трекер
@@ -240,7 +236,7 @@ def process_video(input_path, output_path):
                 # Проверяем, не резко ли изменился bbox (по сравнению с current_bbox)
                 if current_bbox is not None:
                     if is_bbox_change_abrupt(current_bbox, new_bbox):
-                        # Резкий скачок => сбой, сбрасываем цель
+                        # Резкий скачок => сбрасываем цель
                         has_target = False
                         current_bbox = None
                         out.write(frame)
@@ -267,7 +263,7 @@ def process_video(input_path, output_path):
                 x, y, w, h = current_bbox
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-                # Подпишем (для примера) координаты центра bbox
+                # Пример подписи: координаты центра bbox
                 cx = x + w//2
                 cy = y + h//2
                 text = f"BBox: ({x},{y},{w},{h}), center=({cx},{cy})"
@@ -285,17 +281,24 @@ def process_video(input_path, output_path):
     print(f"Результат сохранён в: {output_path}")
 
 if __name__ == "__main__":
+    # Три варианта:
     print("Выберите режим:")
     print("1) Использовать RTSP-поток (rtsp://root:root@192.168.0.90/axis-media/media.amp?compression=100)")
-    print("2) Использовать локальное видео (input/3.mp4)")
-    mode = input("Ваш выбор (1 или 2): ")
+    print("2) Использовать локальное видео (input/1.mp4)")
+    print("3) Использовать HTTP (M-JPEG) для Axis Q1921 (http://root:root@192.168.0.90/axis-cgi/mjpg/video.cgi)")
+    mode = input("Ваш выбор (1, 2 или 3): ").strip()
 
-    if mode.strip() == '1':
+    if mode == '1':
         input_source = "rtsp://root:root@192.168.0.90/axis-media/media.amp?compression=100"
+    elif mode == '3':
+        # Пример для Axis Q1921 (M-JPEG по HTTP)
+        # Возможны варианты URL, в зависимости от настроек
+        input_source = "http://root:root@192.168.0.90/axis-cgi/mjpg/video.cgi"
     else:
-        input_source = "input/3.mp4"
+        # По умолчанию – локальный файл
+        input_source = "input/1.mp4"
 
     os.makedirs("output", exist_ok=True)
-    output_file = "output/3_processed.mp4"
+    output_file = "output/1_processed.mp4"
 
     process_video(input_source, output_file)
