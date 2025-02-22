@@ -284,7 +284,7 @@ if __name__ == "__main__":
     print("Выберите режим:")
     print("1) Использовать RTSP-поток (rtsp://root:root@192.168.0.90/axis-media/media.amp?compression=100)")
     print("2) Использовать локальное видео (input/1.mp4)")
-    print("3) Использовать HTTP (M-JPEG) для Axis Q1921 (http://root:root@192.168.0.90/axis-cgi/mjpg/video.cgi)")
+    print("3) Использовать HTTP (http://root:root@192.168.0.90/axis-cgi/mjpg/video.cgi)")
     mode = input("Ваш выбор (1, 2 или 3): ").strip()
 
     if mode == '1':
@@ -293,7 +293,7 @@ if __name__ == "__main__":
         # ?fps=25&resolution=640x480
         input_source = "http://root:root@192.168.0.90/axis-cgi/mjpg/video.cgi"
     else:
-        input_source = "input/1.mp4"
+        input_source = "input/3.mp4"
 
     os.makedirs("output", exist_ok=True)
     output_file = "output/1_processed.mp4"
