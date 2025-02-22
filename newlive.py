@@ -3,6 +3,9 @@ import numpy as np
 import tkinter as tk
 import time
 
+# Глобальная переменная для хранения усреднённой (сглаженной) позиции объекта
+smoothed_position = None
+
 def listAvailableCameras(max_cameras=10):
     available_cameras = []
     for i in range(max_cameras):
@@ -32,31 +35,16 @@ def selectCamera():
         except ValueError:
             print("Введите номер камеры")
 
-def detectBrightSpots(gray, detection_count, min_distance, brightness_threshold):
-    """
-    Находит несколько ярких точек в изображении gray.
-    После каждого обнаружения область вокруг точки (радиус = min_distance) обнуляется, чтобы
-    следующие обнаружения были далеко от предыдущих.
-    """
-    spots = []
-    temp = gray.copy()
-    for i in range(detection_count):
-        minVal, maxVal, minLoc, maxLoc = cv2.minMaxLoc(temp)
-        if maxVal < brightness_threshold:
-            break
-        spots.append(maxLoc)
-        # Обнуляем область вокруг найденной точки
-        cv2.circle(temp, maxLoc, min_distance, 0, thickness=-1)
-    return spots
+def processFrame(frame: np.ndarray, rect_size, brightness_threshold, frames_avg, max_jump) -> np.ndarray:
+    global smoothed_position
 
-def processFrame(frame: np.ndarray, detection_count, min_distance, rect_size, brightness_threshold) -> np.ndarray:
     # Обрезаем нижние 10 пикселей
     if frame.shape[0] > 10:
         frame = frame[:-10, :]
     else:
         print("Размер кадра слишком мал для обрезки нижних 10 пикселей")
     
-    # Проверяем, что ширина кадра достаточная для разбиения на две части
+    # Проверяем, что ширина кадра достаточная для разбиения
     if frame.shape[1] < 1280:
         print(f"Warning: ширина кадра меньше 1280. Текущая ширина: {frame.shape[1]}")
         return frame
@@ -75,14 +63,40 @@ def processFrame(frame: np.ndarray, detection_count, min_distance, rect_size, br
     # Преобразуем в формат BGR для возможности рисования цветных рамок
     processed = cv2.cvtColor(inverted, cv2.COLOR_GRAY2BGR)
     
-    # Для обнаружения ярких точек переводим processed в оттенки серого
+    # Для обнаружения яркого объекта переводим processed в оттенки серого
     gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
     
-    # Обнаруживаем несколько ярких точек согласно настройкам
-    spots = detectBrightSpots(gray, detection_count, min_distance, brightness_threshold)
+    # Находим ярчайший пиксель
+    minVal, maxVal, minLoc, maxLoc = cv2.minMaxLoc(gray)
+    if maxVal < brightness_threshold:
+        # Если яркость слишком низкая – не обновляем трекер
+        candidate = None
+    else:
+        candidate = maxLoc
+
+    if candidate is not None:
+        # Если трекер ещё не инициализирован, задаём его равным найденной точке
+        if smoothed_position is None:
+            smoothed_position = candidate
+        else:
+            # Вычисляем разницу между новой точкой и предыдущим усреднённым положением
+            dx = candidate[0] - smoothed_position[0]
+            dy = candidate[1] - smoothed_position[1]
+            distance = np.hypot(dx, dy)
+            # Ограничиваем максимальное перемещение
+            if distance > max_jump:
+                scale = max_jump / distance
+                dx = int(dx * scale)
+                dy = int(dy * scale)
+                candidate = (smoothed_position[0] + dx, smoothed_position[1] + dy)
+            # Экспоненциальное сглаживание: alpha = 1/frames_avg
+            alpha = 1.0 / frames_avg if frames_avg > 0 else 1.0
+            smoothed_position = (int(smoothed_position[0] + alpha * (candidate[0] - smoothed_position[0])),
+                                 int(smoothed_position[1] + alpha * (candidate[1] - smoothed_position[1])))
     
-    # Рисуем зеленую рамку вокруг каждой обнаруженной точки
-    for (x, y) in spots:
+    # Если трекер определён, рисуем вокруг него рамку
+    if smoothed_position is not None:
+        x, y = smoothed_position
         top_left = (max(0, x - rect_size // 2), max(0, y - rect_size // 2))
         bottom_right = (min(processed.shape[1]-1, x + rect_size // 2), min(processed.shape[0]-1, y + rect_size // 2))
         cv2.rectangle(processed, top_left, bottom_right, (0, 255, 0), 2)
@@ -91,7 +105,7 @@ def processFrame(frame: np.ndarray, detection_count, min_distance, rect_size, br
 
 def create_settings_window():
     """
-    Создает окно с настройками обнаружения объектов с помощью Tkinter.
+    Создаёт окно с настройками обнаружения объектов с помощью Tkinter.
     Возвращает ссылку на окно и элементы Scale для управления параметрами.
     """
     root = tk.Tk()
@@ -103,29 +117,30 @@ def create_settings_window():
     rect_size_scale.set(20)
     rect_size_scale.grid(row=0, column=1)
 
-    # Настройка количества обнаружений ярких точек
-    tk.Label(root, text="Количество обнаружений:").grid(row=1, column=0, sticky="w")
-    detection_count_scale = tk.Scale(root, from_=1, to=10, orient=tk.HORIZONTAL)
-    detection_count_scale.set(3)
-    detection_count_scale.grid(row=1, column=1)
-
-    # Настройка минимального расстояния между точками
-    tk.Label(root, text="Минимальное расстояние (px):").grid(row=2, column=0, sticky="w")
-    min_distance_scale = tk.Scale(root, from_=1, to=100, orient=tk.HORIZONTAL)
-    min_distance_scale.set(30)
-    min_distance_scale.grid(row=2, column=1)
-
     # Настройка порога яркости для обнаружения
-    tk.Label(root, text="Порог яркости:").grid(row=3, column=0, sticky="w")
+    tk.Label(root, text="Порог яркости:").grid(row=1, column=0, sticky="w")
     brightness_threshold_scale = tk.Scale(root, from_=0, to=255, orient=tk.HORIZONTAL)
     brightness_threshold_scale.set(200)
-    brightness_threshold_scale.grid(row=3, column=1)
+    brightness_threshold_scale.grid(row=1, column=1)
 
-    return root, rect_size_scale, detection_count_scale, min_distance_scale, brightness_threshold_scale
+    # Настройка количества кадров для усреднения (сглаживание)
+    tk.Label(root, text="Кадров для усреднения:").grid(row=2, column=0, sticky="w")
+    frames_avg_scale = tk.Scale(root, from_=1, to=30, orient=tk.HORIZONTAL)
+    frames_avg_scale.set(5)
+    frames_avg_scale.grid(row=2, column=1)
+
+    # Настройка максимального смещения (px)
+    tk.Label(root, text="Максимальное смещение (px):").grid(row=3, column=0, sticky="w")
+    max_jump_scale = tk.Scale(root, from_=1, to=100, orient=tk.HORIZONTAL)
+    max_jump_scale.set(50)
+    max_jump_scale.grid(row=3, column=1)
+
+    return root, rect_size_scale, brightness_threshold_scale, frames_avg_scale, max_jump_scale
 
 def main():
-    # Создаем окно настроек
-    root, rect_size_scale, detection_count_scale, min_distance_scale, brightness_threshold_scale = create_settings_window()
+    global smoothed_position
+    # Создаём окно настроек
+    root, rect_size_scale, brightness_threshold_scale, frames_avg_scale, max_jump_scale = create_settings_window()
 
     camera_index = selectCamera()
     cap = cv2.VideoCapture(camera_index)
@@ -142,6 +157,9 @@ def main():
     previous_time = time.time()
     print("Нажмите 'q' для выхода.")
 
+    # Сбрасываем усреднённую позицию при запуске
+    smoothed_position = None
+
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -150,12 +168,12 @@ def main():
 
         # Получаем текущие значения параметров из окна Tkinter
         rect_size = rect_size_scale.get()
-        detection_count = detection_count_scale.get()
-        min_distance = min_distance_scale.get()
         brightness_threshold = brightness_threshold_scale.get()
+        frames_avg = frames_avg_scale.get()
+        max_jump = max_jump_scale.get()
 
-        # Обработка кадра с учетом настроек обнаружения
-        processed_frame = processFrame(frame, detection_count, min_distance, rect_size, brightness_threshold)
+        # Обрабатываем кадр с учётом настроек обнаружения и трекинга
+        processed_frame = processFrame(frame, rect_size, brightness_threshold, frames_avg, max_jump)
 
         # Вычисляем FPS
         current_time = time.time()
